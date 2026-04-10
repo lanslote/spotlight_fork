@@ -6,6 +6,33 @@ Spotlight is the open-source alternative to [Arcade](https://arcade.software). I
 
 ---
 
+## 🆕 Recent Updates (Fork)
+
+This fork includes the following improvements to the **Interactive Demo Builder**:
+
+### Video Analysis & Screenshot Extraction
+- **Real video analysis** — replaced placeholder logic with actual `VideoAnalyzer` engine for multi-step screenshot extraction
+- **Sensitivity presets** — choose Low / Medium / High / Very High to control scene detection granularity
+- **Improved scene detection** — fixed consecutive cut frame handling so no screen changes are missed
+
+### Editor Enhancements
+- **Hotspot resize** — drag handle + numeric W/H inputs in properties panel
+- **Callout resize** — drag handle + numeric W/H inputs
+- **Callout font size** — adjustable 8–32px via slider
+- **Callout alignment** — horizontal (left/center/right) and vertical (top/middle/bottom)
+- **Blur region drag & resize** — full drag-to-move and resize handle support
+- **Image upload per step** — drop or click to upload screenshots for manually added steps
+- **Image fit modes** — Cover / Contain / Fill toggle per step
+- **Bulk apply** — set transition type and duration across all steps at once
+- **Overlay selection fix** — hotspots, callouts, and blur regions can now be reliably selected after creation
+
+### Preview & Export
+- **Step transitions** — fade, slide-left, slide-right, zoom, morph, none — all working in preview and DemoPlayer
+- **HTML export parity** — all editor properties (hotspot shape, callout size/font/alignment, image fit, blur regions, branch targets) now correctly reflected in exported HTML
+- **Hotspot shape** — changed from circle to rounded rectangle for better coverage of UI elements
+
+---
+
 ## What You Can Do
 
 ### Launch Videos
