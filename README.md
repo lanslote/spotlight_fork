@@ -58,8 +58,8 @@ Upload any screen recording and Spotlight auto-detects scenes, clicks, and curso
 
 ```bash
 # Clone and install
-git clone https://github.com/code-mohanprakash/spotlight.git
-cd spotlight
+git clone https://github.com/lanslote/spotlight_fork.git
+cd spotlight_fork
 npm install
 
 # Run the dev server

@@ -8,7 +8,7 @@ const LINKS = [
     icon: <BookOpen className="w-3.5 h-3.5" />,
   },
   {
-    href: "https://github.com/code-mohanprakash/spotlight",
+    href: "https://github.com/lanslote/spotlight_fork",
     label: "GitHub",
     icon: <Github className="w-3.5 h-3.5" />,
     external: true,

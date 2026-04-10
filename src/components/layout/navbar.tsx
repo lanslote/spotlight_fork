@@ -12,7 +12,7 @@ const NAV_LINKS = [
   { href: "/demo", label: "Demo Builder" },
   { href: "/editor/product-hunt", label: "Editor" },
   {
-    href: "https://github.com/code-mohanprakash/spotlight",
+    href: "https://github.com/lanslote/spotlight_fork",
     label: "GitHub",
     external: true,
     icon: <Github className="w-3.5 h-3.5" />,

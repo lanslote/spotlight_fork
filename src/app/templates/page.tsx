@@ -205,7 +205,7 @@ export default function TemplatesPage() {
                 notify you when new ones ship.
               </p>
               <a
-                href="https://github.com/code-mohanprakash/spotlight"
+                href="https://github.com/lanslote/spotlight_fork"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-white/[0.05] border border-white/[0.1] text-zinc-200 text-sm hover:bg-white/[0.08] hover:border-white/[0.16] transition-all"
