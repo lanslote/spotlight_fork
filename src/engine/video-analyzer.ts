@@ -18,13 +18,13 @@ export interface AnalyzerConfig {
   thumbnailScale?: number;
   /** Frames per second to sample for analysis. Default 5 */
   analysisFPS?: number;
-  /** Scene cut threshold — fraction of pixels changed (0-1). Default 0.6 */
+  /** Scene cut threshold — fraction of pixels changed (0-1). Default 0.15 */
   sceneCutThreshold?: number;
   /** Idle threshold — fraction of pixels changed below this = idle (0-1). Default 0.02 */
   idleThreshold?: number;
   /** Per-pixel color difference threshold (0-765). Default 30 */
   pixelDiffThreshold?: number;
-  /** Minimum scene duration in seconds. Default 0.5 */
+  /** Minimum scene duration in seconds. Default 0.3 */
   minSceneDuration?: number;
   /** Minimum idle duration to flag (seconds). Default 2.0 */
   minIdleDuration?: number;
@@ -469,10 +469,10 @@ export class VideoAnalyzer {
     this._config = {
       thumbnailScale: config.thumbnailScale ?? 0.1,
       analysisFPS: config.analysisFPS ?? 5,
-      sceneCutThreshold: config.sceneCutThreshold ?? 0.6,
+      sceneCutThreshold: config.sceneCutThreshold ?? 0.15,
       idleThreshold: config.idleThreshold ?? 0.02,
       pixelDiffThreshold: config.pixelDiffThreshold ?? 30,
-      minSceneDuration: config.minSceneDuration ?? 0.5,
+      minSceneDuration: config.minSceneDuration ?? 0.3,
       minIdleDuration: config.minIdleDuration ?? 2.0,
       cursorConfidenceThreshold: config.cursorConfidenceThreshold ?? 0.3,
     };
@@ -682,37 +682,59 @@ export class VideoAnalyzer {
       const isLast = i === frames.length - 1;
 
       if (isCut || isLast) {
-        const endIdx = isLast ? i : i - 1;
-        const startTime = frames[segStart].time;
-        const endTime = frames[endIdx].time;
-        const duration = endTime - startTime;
+        // End the current "stable" segment (segStart .. i-1 or i if last)
+        const endIdx = isLast && !isCut ? i : i - 1;
 
-        // Only add segments above minimum duration
-        if (duration >= this._config.minSceneDuration || segments.length === 0) {
-          let totalChange = 0;
-          for (let j = segStart; j <= endIdx; j++) {
-            totalChange += frames[j].changeRatio;
+        if (endIdx >= segStart) {
+          const startTime = frames[segStart].time;
+          const endTime = frames[endIdx].time;
+          const duration = endTime - startTime;
+
+          if (duration >= this._config.minSceneDuration || segments.length === 0) {
+            let totalChange = 0;
+            for (let j = segStart; j <= endIdx; j++) {
+              totalChange += frames[j].changeRatio;
+            }
+
+            segments.push({
+              id: makeSegId(),
+              type: "content",
+              startTime,
+              endTime,
+              duration,
+              startFrame: segStart,
+              endFrame: endIdx,
+              avgChangeRatio: totalChange / (endIdx - segStart + 1),
+            });
+          } else if (segments.length > 0) {
+            const prev = segments[segments.length - 1];
+            prev.endTime = endTime;
+            prev.duration = prev.endTime - prev.startTime;
+            prev.endFrame = endIdx;
           }
-
-          segments.push({
-            id: makeSegId(),
-            type: "content",
-            startTime,
-            endTime,
-            duration,
-            startFrame: segStart,
-            endFrame: endIdx,
-            avgChangeRatio: totalChange / (endIdx - segStart + 1),
-          });
-        } else if (segments.length > 0) {
-          // Merge short segments into the previous one
-          const prev = segments[segments.length - 1];
-          prev.endTime = endTime;
-          prev.duration = prev.endTime - prev.startTime;
-          prev.endFrame = endIdx;
         }
 
-        segStart = i;
+        // If this frame is a cut, it represents a new distinct screen.
+        // Create a segment starting at this cut frame.
+        if (isCut) {
+          // Look ahead: find the end of this new stable region
+          // (next cut or end of frames). For now, just start new segment here.
+          segStart = i;
+
+          // If this is also the last frame, emit a single-frame segment.
+          if (isLast) {
+            segments.push({
+              id: makeSegId(),
+              type: "content",
+              startTime: frames[i].time,
+              endTime: frames[i].time,
+              duration: 0,
+              startFrame: i,
+              endFrame: i,
+              avgChangeRatio: frames[i].changeRatio,
+            });
+          }
+        }
       }
     }
 

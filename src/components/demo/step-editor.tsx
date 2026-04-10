@@ -106,6 +106,11 @@ function newCallout(cx: number, cy: number): Callout {
     position: { x: Math.max(0.05, Math.min(0.95, cx)), y: Math.max(0.05, Math.min(0.95, cy)) },
     anchor: "bottom",
     style: "tooltip",
+    width: 0.15,
+    height: 0.06,
+    fontSize: 12,
+    textAlign: "left",
+    verticalAlign: "top",
   };
 }
 
@@ -147,13 +152,16 @@ function HotspotOverlay({
   isSelected,
   onSelect,
   onDragEnd,
+  onResize,
 }: {
   hotspot: Hotspot;
   isSelected: boolean;
   onSelect: () => void;
   onDragEnd: (x: number, y: number) => void;
+  onResize: (w: number, h: number) => void;
 }) {
   const dragStart = useRef<{ mx: number; my: number; ox: number; oy: number } | null>(null);
+  const resizeStart = useRef<{ mx: number; my: number; ow: number; oh: number } | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
   const handleMouseDown = useCallback(
@@ -200,6 +208,48 @@ function HotspotOverlay({
     [hotspot.bounds.height, hotspot.bounds.width, hotspot.bounds.x, hotspot.bounds.y, onDragEnd, onSelect]
   );
 
+  const handleResizeMouseDown = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation();
+      e.preventDefault();
+      const parent = containerRef.current?.parentElement;
+      if (!parent) return;
+      const rect = parent.getBoundingClientRect();
+      resizeStart.current = {
+        mx: e.clientX,
+        my: e.clientY,
+        ow: hotspot.bounds.width,
+        oh: hotspot.bounds.height,
+      };
+
+      const onMove = (ev: MouseEvent) => {
+        if (!resizeStart.current || !containerRef.current) return;
+        const dx = (ev.clientX - resizeStart.current.mx) / rect.width;
+        const dy = (ev.clientY - resizeStart.current.my) / rect.height;
+        const nw = Math.max(0.02, Math.min(1 - hotspot.bounds.x, resizeStart.current.ow + dx));
+        const nh = Math.max(0.02, Math.min(1 - hotspot.bounds.y, resizeStart.current.oh + dy));
+        containerRef.current.style.width = `${nw * 100}%`;
+        containerRef.current.style.height = `${nh * 100}%`;
+      };
+
+      const onUp = (ev: MouseEvent) => {
+        if (!resizeStart.current) return;
+        const dx = (ev.clientX - resizeStart.current.mx) / rect.width;
+        const dy = (ev.clientY - resizeStart.current.my) / rect.height;
+        const nw = Math.max(0.02, Math.min(1 - hotspot.bounds.x, resizeStart.current.ow + dx));
+        const nh = Math.max(0.02, Math.min(1 - hotspot.bounds.y, resizeStart.current.oh + dy));
+        onResize(nw, nh);
+        resizeStart.current = null;
+        document.removeEventListener("mousemove", onMove);
+        document.removeEventListener("mouseup", onUp);
+      };
+
+      document.addEventListener("mousemove", onMove);
+      document.addEventListener("mouseup", onUp);
+    },
+    [hotspot.bounds.x, hotspot.bounds.y, hotspot.bounds.width, hotspot.bounds.height, onResize]
+  );
+
   return (
     <div
       ref={containerRef}
@@ -209,20 +259,28 @@ function HotspotOverlay({
       )}
       style={rectToStyle(hotspot.bounds.x, hotspot.bounds.y, hotspot.bounds.width, hotspot.bounds.height)}
       onMouseDown={handleMouseDown}
+      onClick={(e) => e.stopPropagation()}
     >
       {/* Pulse ring for pulse style */}
       {hotspot.style === "pulse" && (
-        <div className="absolute inset-0 rounded-full border-2 border-violet-500 animate-ping opacity-60" />
+        <div className="absolute inset-0 rounded-lg border-2 border-violet-500 animate-ping opacity-60" />
       )}
       <div
         className={cn(
-          "absolute inset-0 rounded-full flex items-center justify-center transition-colors",
-          hotspot.style === "pulse" && "bg-violet-500/30 border-2 border-violet-400",
-          hotspot.style === "highlight" && "bg-yellow-400/30 border-2 border-yellow-400",
-          hotspot.style === "outline" && "bg-transparent border-2 border-zinc-300",
-          hotspot.style === "arrow" && "bg-violet-500/20 border-2 border-violet-500"
+          "absolute inset-0 flex items-center justify-center transition-colors",
+          hotspot.style === "pulse" && "bg-violet-500/30 border-2 border-violet-400 rounded-lg",
+          hotspot.style === "highlight" && "bg-yellow-400/30 border-2 border-yellow-400 rounded-lg",
+          hotspot.style === "outline" && "bg-transparent border-2 border-zinc-300 rounded-lg",
+          hotspot.style === "arrow" && "bg-violet-500/20 border-2 border-violet-500 rounded-lg"
         )}
       />
+      {/* Resize handle — bottom-right corner */}
+      {isSelected && (
+        <div
+          className="absolute -bottom-1.5 -right-1.5 w-3 h-3 bg-violet-500 border border-violet-300 rounded-sm cursor-nwse-resize z-10"
+          onMouseDown={handleResizeMouseDown}
+        />
+      )}
       {/* Tooltip preview */}
       {hotspot.tooltip && isSelected && (
         <div className="absolute -top-7 left-1/2 -translate-x-1/2 whitespace-nowrap text-[10px] bg-zinc-900 border border-zinc-700 text-zinc-200 rounded px-2 py-1 pointer-events-none">
@@ -238,14 +296,20 @@ function CalloutOverlay({
   isSelected,
   onSelect,
   onDragEnd,
+  onResize,
 }: {
   callout: Callout;
   isSelected: boolean;
   onSelect: () => void;
   onDragEnd: (x: number, y: number) => void;
+  onResize: (w: number, h: number) => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const dragStart = useRef<{ mx: number; my: number; ox: number; oy: number } | null>(null);
+  const resizeStart = useRef<{ mx: number; my: number; ow: number; oh: number } | null>(null);
+
+  const cw = callout.width ?? 0.15;
+  const ch = callout.height ?? 0.06;
 
   const handleMouseDown = useCallback(
     (e: React.MouseEvent) => {
@@ -283,28 +347,85 @@ function CalloutOverlay({
     [callout.position.x, callout.position.y, onDragEnd, onSelect]
   );
 
+  const handleResizeMouseDown = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation();
+      e.preventDefault();
+      const parent = containerRef.current?.parentElement;
+      if (!parent) return;
+      const rect = parent.getBoundingClientRect();
+      resizeStart.current = { mx: e.clientX, my: e.clientY, ow: cw, oh: ch };
+
+      const onMove = (ev: MouseEvent) => {
+        if (!resizeStart.current || !containerRef.current) return;
+        const dx = (ev.clientX - resizeStart.current.mx) / rect.width;
+        const dy = (ev.clientY - resizeStart.current.my) / rect.height;
+        const nw = Math.max(0.04, Math.min(1, resizeStart.current.ow + dx));
+        const nh = Math.max(0.03, Math.min(1, resizeStart.current.oh + dy));
+        containerRef.current.style.width = `${nw * 100}%`;
+        containerRef.current.style.height = `${nh * 100}%`;
+      };
+
+      const onUp = (ev: MouseEvent) => {
+        if (!resizeStart.current) return;
+        const dx = (ev.clientX - resizeStart.current.mx) / rect.width;
+        const dy = (ev.clientY - resizeStart.current.my) / rect.height;
+        const nw = Math.max(0.04, Math.min(1, resizeStart.current.ow + dx));
+        const nh = Math.max(0.03, Math.min(1, resizeStart.current.oh + dy));
+        onResize(nw, nh);
+        resizeStart.current = null;
+        document.removeEventListener("mousemove", onMove);
+        document.removeEventListener("mouseup", onUp);
+      };
+
+      document.addEventListener("mousemove", onMove);
+      document.addEventListener("mouseup", onUp);
+    },
+    [cw, ch, onResize]
+  );
+
   return (
     <div
       ref={containerRef}
       className={cn(
-        "absolute cursor-move rounded-lg px-2 py-1.5 text-xs leading-snug select-none",
+        "absolute cursor-move rounded-lg px-2 py-1.5 leading-snug select-none",
         "bg-zinc-900/90 border backdrop-blur-sm",
         callout.style === "tooltip" && "border-zinc-600 text-zinc-200",
         callout.style === "badge" && "border-violet-500/60 bg-violet-900/70 text-violet-100",
         callout.style === "arrow" && "border-yellow-500/60 bg-yellow-900/60 text-yellow-100",
         isSelected && "ring-2 ring-violet-400 ring-offset-1 ring-offset-transparent"
       )}
-      style={rectToStyle(callout.position.x, callout.position.y, 0.15, 0.06)}
+      style={{
+        ...rectToStyle(callout.position.x, callout.position.y, cw, ch),
+        fontSize: `${callout.fontSize ?? 12}px`,
+      }}
       onMouseDown={handleMouseDown}
-      contentEditable={isSelected}
-      suppressContentEditableWarning
+      onClick={(e) => e.stopPropagation()}
     >
-      {callout.number !== undefined && (
-        <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-violet-600 text-[9px] font-bold text-white mr-1">
-          {callout.number}
-        </span>
+      <div
+        className={cn(
+          "overflow-hidden w-full h-full flex flex-col",
+          (callout.textAlign ?? "left") === "left" && "text-left",
+          callout.textAlign === "center" && "text-center",
+          callout.textAlign === "right" && "text-right",
+          (callout.verticalAlign ?? "top") === "top" && "justify-start",
+          callout.verticalAlign === "middle" && "justify-center",
+          callout.verticalAlign === "bottom" && "justify-end"
+        )}
+      >
+        {callout.number !== undefined && (
+          <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-violet-600 text-[9px] font-bold text-white mr-1">
+            {callout.number}
+          </span>
+        )}
+        {callout.text}
+      </div>
+      {isSelected && (
+        <div
+          className="absolute -bottom-1.5 -right-1.5 w-3 h-3 bg-violet-500 border border-violet-300 rounded-sm cursor-nwse-resize z-10"
+          onMouseDown={handleResizeMouseDown}
+        />
       )}
-      {callout.text}
     </div>
   );
 }
@@ -313,42 +434,150 @@ function BlurOverlay({
   region,
   isSelected,
   onSelect,
+  onDragEnd,
+  onResize,
 }: {
   region: BlurRegion;
   isSelected: boolean;
   onSelect: () => void;
+  onDragEnd: (x: number, y: number) => void;
+  onResize: (w: number, h: number) => void;
 }) {
   const blurPx = Math.round(region.intensity * 20);
+  const posStyle = rectToStyle(region.bounds.x, region.bounds.y, region.bounds.width, region.bounds.height);
+  const hitRef = useRef<HTMLDivElement>(null);
+  const dragStart = useRef<{ mx: number; my: number; ox: number; oy: number } | null>(null);
+  const resizeStart = useRef<{ mx: number; my: number; ow: number; oh: number } | null>(null);
+
+  const handleMouseDown = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation();
+      onSelect();
+      const parent = hitRef.current?.parentElement;
+      if (!parent) return;
+      const rect = parent.getBoundingClientRect();
+      dragStart.current = { mx: e.clientX, my: e.clientY, ox: region.bounds.x, oy: region.bounds.y };
+
+      const onMove = (ev: MouseEvent) => {
+        if (!dragStart.current || !hitRef.current) return;
+        const dx = (ev.clientX - dragStart.current.mx) / rect.width;
+        const dy = (ev.clientY - dragStart.current.my) / rect.height;
+        const nx = Math.max(0, Math.min(1 - region.bounds.width, dragStart.current.ox + dx));
+        const ny = Math.max(0, Math.min(1 - region.bounds.height, dragStart.current.oy + dy));
+        hitRef.current.style.left = `${nx * 100}%`;
+        hitRef.current.style.top = `${ny * 100}%`;
+        // Also move the blur visual layer (previous sibling)
+        const blurEl = hitRef.current.previousElementSibling as HTMLElement | null;
+        if (blurEl) {
+          blurEl.style.left = `${nx * 100}%`;
+          blurEl.style.top = `${ny * 100}%`;
+        }
+      };
+
+      const onUp = (ev: MouseEvent) => {
+        if (!dragStart.current) return;
+        const dx = (ev.clientX - dragStart.current.mx) / rect.width;
+        const dy = (ev.clientY - dragStart.current.my) / rect.height;
+        const nx = Math.max(0, Math.min(1 - region.bounds.width, dragStart.current.ox + dx));
+        const ny = Math.max(0, Math.min(1 - region.bounds.height, dragStart.current.oy + dy));
+        onDragEnd(nx, ny);
+        dragStart.current = null;
+        document.removeEventListener("mousemove", onMove);
+        document.removeEventListener("mouseup", onUp);
+      };
+
+      document.addEventListener("mousemove", onMove);
+      document.addEventListener("mouseup", onUp);
+    },
+    [region.bounds.x, region.bounds.y, region.bounds.width, region.bounds.height, onDragEnd, onSelect]
+  );
+
+  const handleResizeMouseDown = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation();
+      e.preventDefault();
+      const parent = hitRef.current?.parentElement;
+      if (!parent) return;
+      const rect = parent.getBoundingClientRect();
+      resizeStart.current = { mx: e.clientX, my: e.clientY, ow: region.bounds.width, oh: region.bounds.height };
+
+      const onMove = (ev: MouseEvent) => {
+        if (!resizeStart.current || !hitRef.current) return;
+        const dx = (ev.clientX - resizeStart.current.mx) / rect.width;
+        const dy = (ev.clientY - resizeStart.current.my) / rect.height;
+        const nw = Math.max(0.02, Math.min(1 - region.bounds.x, resizeStart.current.ow + dx));
+        const nh = Math.max(0.02, Math.min(1 - region.bounds.y, resizeStart.current.oh + dy));
+        hitRef.current.style.width = `${nw * 100}%`;
+        hitRef.current.style.height = `${nh * 100}%`;
+        const blurEl = hitRef.current.previousElementSibling as HTMLElement | null;
+        if (blurEl) {
+          blurEl.style.width = `${nw * 100}%`;
+          blurEl.style.height = `${nh * 100}%`;
+        }
+      };
+
+      const onUp = (ev: MouseEvent) => {
+        if (!resizeStart.current) return;
+        const dx = (ev.clientX - resizeStart.current.mx) / rect.width;
+        const dy = (ev.clientY - resizeStart.current.my) / rect.height;
+        const nw = Math.max(0.02, Math.min(1 - region.bounds.x, resizeStart.current.ow + dx));
+        const nh = Math.max(0.02, Math.min(1 - region.bounds.y, resizeStart.current.oh + dy));
+        onResize(nw, nh);
+        resizeStart.current = null;
+        document.removeEventListener("mousemove", onMove);
+        document.removeEventListener("mouseup", onUp);
+      };
+
+      document.addEventListener("mousemove", onMove);
+      document.addEventListener("mouseup", onUp);
+    },
+    [region.bounds.x, region.bounds.y, region.bounds.width, region.bounds.height, onResize]
+  );
+
   return (
-    <div
-      className={cn(
-        "absolute cursor-pointer border-2 border-dashed",
-        isSelected
-          ? "border-violet-400"
-          : "border-zinc-500/50 hover:border-zinc-400",
-        "transition-colors"
-      )}
-      style={{
-        ...rectToStyle(region.bounds.x, region.bounds.y, region.bounds.width, region.bounds.height),
-        backdropFilter:
-          region.mode === "blur"
-            ? `blur(${blurPx}px)`
-            : region.mode === "pixelate"
-            ? `blur(${Math.round(blurPx / 3)}px)`
-            : "none",
-        background:
-          region.mode === "mask" ? "rgba(9,9,11,0.8)" : "rgba(0,0,0,0.15)",
-      }}
-      onMouseDown={(e) => {
-        e.stopPropagation();
-        onSelect();
-      }}
-    >
-      {/* Mode badge */}
-      <span className="absolute top-1 left-1 text-[9px] font-semibold uppercase tracking-wide bg-black/60 text-zinc-400 rounded px-1 leading-4">
-        {region.mode}
-      </span>
-    </div>
+    <>
+      {/* Visual blur layer — no pointer events */}
+      <div
+        className="absolute pointer-events-none"
+        style={{
+          ...posStyle,
+          backdropFilter:
+            region.mode === "blur"
+              ? `blur(${blurPx}px)`
+              : region.mode === "pixelate"
+              ? `blur(${Math.round(blurPx / 3)}px)`
+              : "none",
+          background:
+            region.mode === "mask" ? "rgba(9,9,11,0.8)" : "rgba(0,0,0,0.15)",
+        }}
+      />
+      {/* Interactive hit target — on top, no backdrop filter */}
+      <div
+        ref={hitRef}
+        className={cn(
+          "absolute cursor-move border-2 border-dashed z-10",
+          isSelected
+            ? "border-violet-400 bg-violet-400/10"
+            : "border-zinc-400/60 hover:border-violet-300 bg-transparent",
+          "transition-colors"
+        )}
+        style={posStyle}
+        onMouseDown={handleMouseDown}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Mode badge */}
+        <span className="absolute top-1 left-1 text-[9px] font-semibold uppercase tracking-wide bg-black/70 text-zinc-300 rounded px-1.5 py-0.5 leading-3 pointer-events-none">
+          {region.mode}
+        </span>
+        {/* Resize handle */}
+        {isSelected && (
+          <div
+            className="absolute -bottom-1.5 -right-1.5 w-3 h-3 bg-violet-500 border border-violet-300 rounded-sm cursor-nwse-resize z-10"
+            onMouseDown={handleResizeMouseDown}
+          />
+        )}
+      </div>
+    </>
   );
 }
 
@@ -404,6 +633,47 @@ function HotspotProperties({
         value={hotspot.branchTo ?? ""}
         onChange={(v) => onChange({ ...hotspot, branchTo: v || undefined })}
       />
+      <div>
+        <p className="text-xs font-medium text-zinc-400 mb-1.5 uppercase tracking-wider">
+          Size
+        </p>
+        <div className="grid grid-cols-2 gap-1.5">
+          <Input
+            label="W"
+            type="number"
+            value={Math.round(hotspot.bounds.width * 1000) / 1000}
+            min={0.02}
+            max={1}
+            step={0.01}
+            onChange={(e) => {
+              const val = parseFloat(e.target.value);
+              if (!isNaN(val)) {
+                onChange({
+                  ...hotspot,
+                  bounds: { ...hotspot.bounds, width: Math.max(0.02, Math.min(1, val)) },
+                });
+              }
+            }}
+          />
+          <Input
+            label="H"
+            type="number"
+            value={Math.round(hotspot.bounds.height * 1000) / 1000}
+            min={0.02}
+            max={1}
+            step={0.01}
+            onChange={(e) => {
+              const val = parseFloat(e.target.value);
+              if (!isNaN(val)) {
+                onChange({
+                  ...hotspot,
+                  bounds: { ...hotspot.bounds, height: Math.max(0.02, Math.min(1, val)) },
+                });
+              }
+            }}
+          />
+        </div>
+      </div>
       <Button variant="danger" size="sm" className="w-full" onClick={onDelete}>
         Delete Hotspot
       </Button>
@@ -443,6 +713,58 @@ function CalloutProperties({
         value={callout.anchor}
         onChange={(v) => onChange({ ...callout, anchor: v as Callout["anchor"] })}
       />
+      {/* Text alignment */}
+      <div>
+        <p className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider mb-1">
+          Horizontal
+        </p>
+        <div className="flex gap-1">
+          {(["left", "center", "right"] as const).map((a) => (
+            <button
+              key={a}
+              onClick={() => onChange({ ...callout, textAlign: a })}
+              className={cn(
+                "flex-1 h-7 rounded-md text-[10px] font-semibold uppercase transition-colors",
+                (callout.textAlign ?? "left") === a
+                  ? "bg-violet-600/30 text-violet-300 border border-violet-500/40"
+                  : "bg-zinc-800 text-zinc-500 border border-zinc-700 hover:text-zinc-300"
+              )}
+            >
+              {a === "left" ? "←" : a === "center" ? "↔" : "→"}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div>
+        <p className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider mb-1">
+          Vertical
+        </p>
+        <div className="flex gap-1">
+          {(["top", "middle", "bottom"] as const).map((a) => (
+            <button
+              key={a}
+              onClick={() => onChange({ ...callout, verticalAlign: a })}
+              className={cn(
+                "flex-1 h-7 rounded-md text-[10px] font-semibold uppercase transition-colors",
+                (callout.verticalAlign ?? "top") === a
+                  ? "bg-violet-600/30 text-violet-300 border border-violet-500/40"
+                  : "bg-zinc-800 text-zinc-500 border border-zinc-700 hover:text-zinc-300"
+              )}
+            >
+              {a === "top" ? "↑" : a === "middle" ? "↕" : "↓"}
+            </button>
+          ))}
+        </div>
+      </div>
+      <Slider
+        label="Font Size"
+        min={8}
+        max={32}
+        step={1}
+        value={callout.fontSize ?? 12}
+        onChange={(v) => onChange({ ...callout, fontSize: v })}
+        displayValue={(v) => `${v}px`}
+      />
       <Input
         label="Badge Number"
         type="number"
@@ -457,6 +779,37 @@ function CalloutProperties({
           })
         }
       />
+      <div>
+        <p className="text-xs font-medium text-zinc-400 mb-1.5 uppercase tracking-wider">
+          Size
+        </p>
+        <div className="grid grid-cols-2 gap-1.5">
+          <Input
+            label="W"
+            type="number"
+            value={Math.round((callout.width ?? 0.15) * 1000) / 1000}
+            min={0.04}
+            max={1}
+            step={0.01}
+            onChange={(e) => {
+              const val = parseFloat(e.target.value);
+              if (!isNaN(val)) onChange({ ...callout, width: Math.max(0.04, Math.min(1, val)) });
+            }}
+          />
+          <Input
+            label="H"
+            type="number"
+            value={Math.round((callout.height ?? 0.06) * 1000) / 1000}
+            min={0.03}
+            max={1}
+            step={0.01}
+            onChange={(e) => {
+              const val = parseFloat(e.target.value);
+              if (!isNaN(val)) onChange({ ...callout, height: Math.max(0.03, Math.min(1, val)) });
+            }}
+          />
+        </div>
+      </div>
       <Button variant="danger" size="sm" className="w-full" onClick={onDelete}>
         Delete Callout
       </Button>
@@ -493,6 +846,37 @@ function BlurProperties({
         onChange={(v) => onChange({ ...region, intensity: v / 100 })}
         displayValue={(v) => `${v}%`}
       />
+      <div>
+        <p className="text-xs font-medium text-zinc-400 mb-1.5 uppercase tracking-wider">
+          Size
+        </p>
+        <div className="grid grid-cols-2 gap-1.5">
+          <Input
+            label="W"
+            type="number"
+            value={Math.round(region.bounds.width * 1000) / 1000}
+            min={0.02}
+            max={1}
+            step={0.01}
+            onChange={(e) => {
+              const val = parseFloat(e.target.value);
+              if (!isNaN(val)) onChange({ ...region, bounds: { ...region.bounds, width: Math.max(0.02, Math.min(1, val)) } });
+            }}
+          />
+          <Input
+            label="H"
+            type="number"
+            value={Math.round(region.bounds.height * 1000) / 1000}
+            min={0.02}
+            max={1}
+            step={0.01}
+            onChange={(e) => {
+              const val = parseFloat(e.target.value);
+              if (!isNaN(val)) onChange({ ...region, bounds: { ...region.bounds, height: Math.max(0.02, Math.min(1, val)) } });
+            }}
+          />
+        </div>
+      </div>
       <Button variant="danger" size="sm" className="w-full" onClick={onDelete}>
         Delete Region
       </Button>
@@ -617,12 +1001,28 @@ export function StepEditor({ step, onChange, demo }: StepEditorProps) {
   const [activeTool, setActiveTool] = useState<ActiveTool>("select");
   const [selectedOverlay, setSelectedOverlay] = useState<SelectedOverlay | null>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
   const propertiesPanelId = useId();
 
   // Deselect overlay when step changes
   useEffect(() => {
     setSelectedOverlay(null);
   }, [step.id]);
+
+  // ── Image upload handler ──────────────────────────────────────────────────
+
+  const handleImageUpload = useCallback(
+    (file: File) => {
+      if (!file.type.startsWith("image/")) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        const dataUrl = reader.result as string;
+        onChange({ ...step, screenshotDataUrl: dataUrl, imageFit: "contain" });
+      };
+      reader.readAsDataURL(file);
+    },
+    [onChange, step]
+  );
 
   // ── Overlay mutation helpers ───────────────────────────────────────────────
 
@@ -800,6 +1200,44 @@ export function StepEditor({ step, onChange, demo }: StepEditorProps) {
               Click on canvas to place
             </span>
           )}
+
+          <div className="flex-1" />
+
+          {/* Replace image button */}
+          <button
+            title="Upload / replace screenshot"
+            aria-label="Upload or replace screenshot"
+            onClick={() => imageInputRef.current?.click()}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 border border-transparent transition-colors"
+          >
+            <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
+            </svg>
+            <span>{step.screenshotDataUrl ? "Replace" : "Upload"}</span>
+          </button>
+
+          {/* Image fit selector */}
+          {step.screenshotDataUrl && (
+            <>
+              <div className="w-px h-4 bg-zinc-700 mx-0.5" />
+              {(["cover", "contain", "fill"] as const).map((fit) => (
+                <button
+                  key={fit}
+                  title={`Fit: ${fit}`}
+                  aria-label={`Image fit ${fit}`}
+                  onClick={() => onChange({ ...step, imageFit: fit })}
+                  className={cn(
+                    "px-2 py-1.5 rounded-lg text-[10px] font-semibold uppercase tracking-wider transition-colors",
+                    (step.imageFit ?? "cover") === fit
+                      ? "bg-violet-600/30 text-violet-300 border border-violet-500/40"
+                      : "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 border border-transparent"
+                  )}
+                >
+                  {fit}
+                </button>
+              ))}
+            </>
+          )}
         </div>
 
         {/* Canvas */}
@@ -821,22 +1259,64 @@ export function StepEditor({ step, onChange, demo }: StepEditorProps) {
               <img
                 src={step.screenshotDataUrl}
                 alt="Step screenshot"
-                className="absolute inset-0 w-full h-full object-cover pointer-events-none"
+                className={cn(
+                  "absolute inset-0 w-full h-full pointer-events-none",
+                  (step.imageFit ?? "cover") === "cover" && "object-cover",
+                  step.imageFit === "contain" && "object-contain",
+                  step.imageFit === "fill" && "object-fill",
+                  step.imageFit === "none" && "object-none"
+                )}
                 draggable={false}
               />
             ) : (
-              <div className="absolute inset-0 flex items-center justify-center bg-zinc-900">
-                <div className="text-center space-y-2">
+              <div
+                className="absolute inset-0 flex items-center justify-center bg-zinc-900"
+                onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  const file = e.dataTransfer.files[0];
+                  if (file) handleImageUpload(file);
+                }}
+              >
+                <div className="text-center space-y-3">
                   <div className="w-12 h-12 rounded-full bg-zinc-800 border border-zinc-700 mx-auto flex items-center justify-center">
                     <svg className="w-6 h-6 text-zinc-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M3 20.25h18A2.25 2.25 0 0023.25 18V6A2.25 2.25 0 0021 3.75H3A2.25 2.25 0 00.75 6v12A2.25 2.25 0 003 20.25z" />
                     </svg>
                   </div>
                   <p className="text-sm text-zinc-500">No screenshot for this step</p>
-                  <p className="text-xs text-zinc-600">Upload a video to generate screenshots automatically</p>
+                  <p className="text-xs text-zinc-600">Drop an image here or click below</p>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      imageInputRef.current?.click();
+                    }}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-violet-600 hover:bg-violet-500 text-white transition-colors"
+                  >
+                    <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
+                    </svg>
+                    Upload Image
+                  </button>
                 </div>
               </div>
             )}
+
+            {/* Hidden file input for image upload */}
+            <input
+              ref={imageInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              title="Upload step screenshot"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) handleImageUpload(f);
+                e.target.value = "";
+              }}
+            />
 
             {/* Blur regions (rendered behind other overlays) */}
             {step.blurRegions.map((region) => (
@@ -845,6 +1325,8 @@ export function StepEditor({ step, onChange, demo }: StepEditorProps) {
                 region={region}
                 isSelected={selectedOverlay?.id === region.id}
                 onSelect={() => setSelectedOverlay({ kind: "blur", id: region.id })}
+                onDragEnd={(x, y) => updateBlurRegion({ ...region, bounds: { ...region.bounds, x, y } })}
+                onResize={(w, h) => updateBlurRegion({ ...region, bounds: { ...region.bounds, width: w, height: h } })}
               />
             ))}
 
@@ -856,6 +1338,7 @@ export function StepEditor({ step, onChange, demo }: StepEditorProps) {
                 isSelected={selectedOverlay?.id === callout.id}
                 onSelect={() => setSelectedOverlay({ kind: "callout", id: callout.id })}
                 onDragEnd={(x, y) => updateCallout({ ...callout, position: { x, y } })}
+                onResize={(w, h) => updateCallout({ ...callout, width: w, height: h })}
               />
             ))}
 
@@ -867,6 +1350,7 @@ export function StepEditor({ step, onChange, demo }: StepEditorProps) {
                 isSelected={selectedOverlay?.id === hotspot.id}
                 onSelect={() => setSelectedOverlay({ kind: "hotspot", id: hotspot.id })}
                 onDragEnd={(x, y) => updateHotspot({ ...hotspot, bounds: { ...hotspot.bounds, x, y } })}
+                onResize={(w, h) => updateHotspot({ ...hotspot, bounds: { ...hotspot.bounds, width: w, height: h } })}
               />
             ))}
           </div>

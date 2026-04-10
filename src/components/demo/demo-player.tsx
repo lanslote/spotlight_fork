@@ -658,11 +658,17 @@ export function DemoPlayer({
     return () => obs.disconnect();
   }, []);
 
-  // ── Crossfade transition ──────────────────────────────────────────────────
+  // ── Step transition ──────────────────────────────────────────────────────
 
   /**
-   * Crossfade from the current canvas content to the new step's screenshot.
-   * Uses two canvas elements to avoid a flash of blank content.
+   * Transition from the current canvas content to the new step's screenshot.
+   * Uses two canvas elements and applies the transition type set on the step:
+   *   - "none"        — instant cut
+   *   - "fade"        — crossfade (opacity)
+   *   - "slide-left"  — new step slides in from the right
+   *   - "slide-right" — new step slides in from the left
+   *   - "zoom"        — new step scales up from center
+   *   - "morph"       — crossfade with a subtle scale
    */
   const beginTransition = useCallback(async (newStep: DemoStep) => {
     const canvasA = canvasARef.current;
@@ -674,28 +680,86 @@ export function DemoPlayer({
     transitioningRef.current = true;
     setIsTransitioning(true);
 
-    const duration = 350; // ms — fixed transition duration
+    const transition = newStep.transition ?? "fade";
+
+    // "none" — instant cut, no animation.
+    if (transition === "none") {
+      await renderStepToCanvas(canvasA, newStep);
+      canvasA.style.opacity = "1";
+      canvasA.style.transform = "";
+      canvasB.style.opacity = "0";
+      canvasB.style.transform = "";
+      transitioningRef.current = false;
+      setIsTransitioning(false);
+      return;
+    }
+
+    const duration = transition === "morph" ? 450 : 350; // ms
     const startTime = performance.now();
 
-    // Draw the incoming frame onto canvasB (currently hidden behind canvasA).
+    // Draw the incoming frame onto canvasB.
     await renderStepToCanvas(canvasB, newStep);
+
+    // Reset transforms before starting.
+    canvasB.style.opacity = "0";
+    canvasB.style.transform = "";
 
     const animate = (now: number) => {
       const elapsed = now - startTime;
       const t = Math.min(elapsed / duration, 1);
       const eased = 1 - Math.pow(1 - t, 3); // ease-out-cubic
 
-      // Crossfade: fade canvasA out while canvasB fades in.
-      canvasA.style.opacity = String(1 - eased);
-      canvasB.style.opacity = String(eased);
+      switch (transition) {
+        case "fade":
+          canvasA.style.opacity = String(1 - eased);
+          canvasA.style.transform = "";
+          canvasB.style.opacity = String(eased);
+          canvasB.style.transform = "";
+          break;
+
+        case "slide-left":
+          canvasA.style.opacity = "1";
+          canvasA.style.transform = `translateX(${-eased * 100}%)`;
+          canvasB.style.opacity = "1";
+          canvasB.style.transform = `translateX(${(1 - eased) * 100}%)`;
+          break;
+
+        case "slide-right":
+          canvasA.style.opacity = "1";
+          canvasA.style.transform = `translateX(${eased * 100}%)`;
+          canvasB.style.opacity = "1";
+          canvasB.style.transform = `translateX(${-(1 - eased) * 100}%)`;
+          break;
+
+        case "zoom":
+          canvasA.style.opacity = String(1 - eased);
+          canvasA.style.transform = "";
+          canvasB.style.opacity = String(eased);
+          canvasB.style.transform = `scale(${0.8 + 0.2 * eased})`;
+          break;
+
+        case "morph":
+          canvasA.style.opacity = String(1 - eased);
+          canvasA.style.transform = `scale(${1 + 0.05 * eased})`;
+          canvasB.style.opacity = String(eased);
+          canvasB.style.transform = `scale(${0.95 + 0.05 * eased})`;
+          break;
+
+        default:
+          canvasA.style.opacity = String(1 - eased);
+          canvasB.style.opacity = String(eased);
+          break;
+      }
 
       if (t < 1) {
         rafRef.current = requestAnimationFrame(animate);
       } else {
-        // Swap: render new step onto canvasA, make it fully visible, hide canvasB.
+        // Swap: render new step onto canvasA, reset transforms, hide canvasB.
         renderStepToCanvas(canvasA, newStep).then(() => {
           canvasA.style.opacity = "1";
+          canvasA.style.transform = "";
           canvasB.style.opacity = "0";
+          canvasB.style.transform = "";
           transitioningRef.current = false;
           setIsTransitioning(false);
         });

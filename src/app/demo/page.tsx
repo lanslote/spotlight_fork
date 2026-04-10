@@ -12,8 +12,9 @@ import {
   reorderSteps,
   addStep,
   removeStep,
+  DemoEngine,
 } from "@/engine/demo-engine";
-import type { Demo, DemoStep } from "@/engine/demo-engine";
+import type { Demo, DemoStep, TransitionType } from "@/engine/demo-engine";
 import {
   exportAsHTML,
   exportAsJSON,
@@ -21,6 +22,7 @@ import {
   exportAsGIF,
   downloadBlob,
 } from "@/engine/demo-exporter";
+import { VideoAnalyzer } from "@/engine/video-analyzer";
 
 // ─── Phase machine ─────────────────────────────────────────────────────────────
 
@@ -35,14 +37,57 @@ const ANALYZE_STEPS = [
   "Generating thumbnails",
 ] as const;
 
+// ─── Sensitivity presets ──────────────────────────────────────────────────────
+
+type Sensitivity = "low" | "medium" | "high" | "very-high";
+
+const SENSITIVITY_PRESETS: Record<Sensitivity, { label: string; description: string; analysisFPS: number; sceneCutThreshold: number; thumbnailScale: number; minSceneDuration: number }> = {
+  low: {
+    label: "Low",
+    description: "Page-level changes only (fewest steps)",
+    analysisFPS: 3,
+    sceneCutThreshold: 0.35,
+    thumbnailScale: 0.1,
+    minSceneDuration: 0.8,
+  },
+  medium: {
+    label: "Medium",
+    description: "Tab switches, modals, navigation",
+    analysisFPS: 5,
+    sceneCutThreshold: 0.15,
+    thumbnailScale: 0.1,
+    minSceneDuration: 0.3,
+  },
+  high: {
+    label: "High",
+    description: "Menus, dropdowns, small UI changes",
+    analysisFPS: 8,
+    sceneCutThreshold: 0.06,
+    thumbnailScale: 0.15,
+    minSceneDuration: 0.2,
+  },
+  "very-high": {
+    label: "Very High",
+    description: "Every visible change (most steps)",
+    analysisFPS: 20,
+    sceneCutThreshold: 0.02,
+    thumbnailScale: 0.25,
+    minSceneDuration: 0.1,
+  },
+};
+
 // ─── Upload phase ─────────────────────────────────────────────────────────────
 
 function UploadPhase({
   onUploadVideo,
   onStartBlank,
+  sensitivity,
+  onSensitivityChange,
 }: {
   onUploadVideo: (file: File) => void;
   onStartBlank: () => void;
+  sensitivity: Sensitivity;
+  onSensitivityChange: (s: Sensitivity) => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -187,6 +232,38 @@ function UploadPhase({
         Start with a blank demo
       </Button>
 
+      {/* Sensitivity selector */}
+      <div className="w-full space-y-2">
+        <p className="text-xs font-medium text-zinc-400 text-center">
+          Scene detection sensitivity
+        </p>
+        <div className="grid grid-cols-4 gap-1.5">
+          {(Object.keys(SENSITIVITY_PRESETS) as Sensitivity[]).map((key) => {
+            const preset = SENSITIVITY_PRESETS[key];
+            const isActive = sensitivity === key;
+            return (
+              <button
+                key={key}
+                onClick={() => onSensitivityChange(key)}
+                className={cn(
+                  "flex flex-col items-center gap-1 p-2.5 rounded-xl border transition-all text-center",
+                  isActive
+                    ? "border-violet-500/60 bg-violet-500/10 text-violet-300"
+                    : "border-zinc-800 bg-zinc-900/60 text-zinc-500 hover:border-zinc-700 hover:text-zinc-300"
+                )}
+              >
+                <span className={cn("text-xs font-semibold", isActive && "text-violet-300")}>
+                  {preset.label}
+                </span>
+                <span className="text-[9px] leading-tight opacity-70">
+                  {preset.description}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
       {/* Feature bullets */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full">
         {features.map((f) => (
@@ -317,8 +394,26 @@ function EditStepsPhase({
   const [selectedStepId, setSelectedStepId] = useState<string | null>(
     demo.steps[0]?.id ?? null
   );
+  const [showBulk, setShowBulk] = useState(false);
+  const [bulkTransition, setBulkTransition] = useState<TransitionType>("fade");
+  const [bulkDuration, setBulkDuration] = useState("0");
 
   const selectedStep = demo.steps.find((s) => s.id === selectedStepId) ?? null;
+
+  const handleApplyBulkTransition = useCallback(() => {
+    onDemoChange({
+      ...demo,
+      steps: demo.steps.map((s) => ({ ...s, transition: bulkTransition })),
+    });
+  }, [demo, onDemoChange, bulkTransition]);
+
+  const handleApplyBulkDuration = useCallback(() => {
+    const dur = parseFloat(bulkDuration) || 0;
+    onDemoChange({
+      ...demo,
+      steps: demo.steps.map((s) => ({ ...s, duration: dur })),
+    });
+  }, [demo, onDemoChange, bulkDuration]);
 
   const handleReorderSteps = useCallback(
     (fromIndex: number, toIndex: number) => {
@@ -395,6 +490,87 @@ function EditStepsPhase({
     <div className="flex flex-1 min-h-0 overflow-hidden">
       {/* Left: step list sidebar */}
       <div className="w-52 shrink-0 flex flex-col overflow-hidden">
+        {/* Bulk settings toggle */}
+        <div className="shrink-0 border-b border-zinc-800">
+          <button
+            onClick={() => setShowBulk((v) => !v)}
+            className={cn(
+              "w-full flex items-center justify-between px-3 py-2 text-[11px] font-semibold uppercase tracking-widest transition-colors",
+              showBulk
+                ? "text-violet-400 bg-violet-500/10"
+                : "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50"
+            )}
+          >
+            <span>Apply to All</span>
+            <svg
+              className={cn("w-3 h-3 transition-transform", showBulk && "rotate-180")}
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={2}
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+            </svg>
+          </button>
+
+          {showBulk && (
+            <div className="px-3 pb-3 pt-1 space-y-3 bg-zinc-900/40">
+              {/* Bulk transition */}
+              <div className="space-y-1">
+                <label className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">
+                  Transition
+                </label>
+                <div className="flex gap-1">
+                  <select
+                    value={bulkTransition}
+                    onChange={(e) => setBulkTransition(e.target.value as TransitionType)}
+                    title="Bulk transition type"
+                    className="flex-1 h-7 rounded-md bg-zinc-800 border border-zinc-700 text-xs text-zinc-200 px-1.5 outline-none focus:border-violet-500"
+                  >
+                    <option value="fade">Fade</option>
+                    <option value="slide-left">Slide Left</option>
+                    <option value="slide-right">Slide Right</option>
+                    <option value="zoom">Zoom</option>
+                    <option value="morph">Morph</option>
+                    <option value="none">None</option>
+                  </select>
+                  <button
+                    onClick={handleApplyBulkTransition}
+                    className="shrink-0 h-7 px-2 rounded-md bg-violet-600 hover:bg-violet-500 text-[10px] font-semibold text-white transition-colors"
+                  >
+                    Apply
+                  </button>
+                </div>
+              </div>
+
+              {/* Bulk duration */}
+              <div className="space-y-1">
+                <label className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">
+                  Duration (sec)
+                </label>
+                <div className="flex gap-1">
+                  <input
+                    type="number"
+                    value={bulkDuration}
+                    onChange={(e) => setBulkDuration(e.target.value)}
+                    min={0}
+                    step={0.5}
+                    placeholder="0 = click"
+                    className="flex-1 h-7 rounded-md bg-zinc-800 border border-zinc-700 text-xs text-zinc-200 px-2 outline-none focus:border-violet-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                  />
+                  <button
+                    onClick={handleApplyBulkDuration}
+                    className="shrink-0 h-7 px-2 rounded-md bg-violet-600 hover:bg-violet-500 text-[10px] font-semibold text-white transition-colors"
+                  >
+                    Apply
+                  </button>
+                </div>
+                <p className="text-[9px] text-zinc-600">0 = wait for click</p>
+              </div>
+            </div>
+          )}
+        </div>
+
         <StepList
           demo={demo}
           selectedStepId={selectedStepId}
@@ -429,7 +605,31 @@ function EditStepsPhase({
 
 function PreviewPhase({ demo }: { demo: Demo }) {
   const [currentStepIdx, setCurrentStepIdx] = useState(0);
+  const [prevStepIdx, setPrevStepIdx] = useState(0);
+  const [isTransitioning, setIsTransitioning] = useState(false);
   const step = demo.steps[currentStepIdx];
+
+  const navigateTo = useCallback(
+    (nextIdx: number) => {
+      if (nextIdx === currentStepIdx) return;
+      const nextStep = demo.steps[nextIdx];
+      if (!nextStep) return;
+
+      const transition = nextStep.transition ?? "fade";
+      if (transition === "none") {
+        setCurrentStepIdx(nextIdx);
+        return;
+      }
+
+      setPrevStepIdx(currentStepIdx);
+      setCurrentStepIdx(nextIdx);
+      setIsTransitioning(true);
+
+      const duration = transition === "morph" ? 450 : 350;
+      setTimeout(() => setIsTransitioning(false), duration);
+    },
+    [currentStepIdx, demo.steps]
+  );
 
   if (!step) {
     return (
@@ -439,6 +639,46 @@ function PreviewPhase({ demo }: { demo: Demo }) {
     );
   }
 
+  const transition = step.transition ?? "fade";
+  const prevStep = demo.steps[prevStepIdx];
+
+  // CSS animation classes based on transition type
+  const getIncomingClass = () => {
+    if (!isTransitioning) return "";
+    switch (transition) {
+      case "fade":
+        return "animate-[fadeIn_350ms_ease-out_forwards]";
+      case "slide-left":
+        return "animate-[slideInFromRight_350ms_ease-out_forwards]";
+      case "slide-right":
+        return "animate-[slideInFromLeft_350ms_ease-out_forwards]";
+      case "zoom":
+        return "animate-[zoomIn_350ms_ease-out_forwards]";
+      case "morph":
+        return "animate-[morphIn_450ms_ease-out_forwards]";
+      default:
+        return "";
+    }
+  };
+
+  const getOutgoingClass = () => {
+    if (!isTransitioning) return "hidden";
+    switch (transition) {
+      case "fade":
+        return "animate-[fadeOut_350ms_ease-out_forwards]";
+      case "slide-left":
+        return "animate-[slideOutToLeft_350ms_ease-out_forwards]";
+      case "slide-right":
+        return "animate-[slideOutToRight_350ms_ease-out_forwards]";
+      case "zoom":
+        return "animate-[fadeOut_350ms_ease-out_forwards]";
+      case "morph":
+        return "animate-[morphOut_450ms_ease-out_forwards]";
+      default:
+        return "hidden";
+    }
+  };
+
   return (
     <div className="flex flex-1 min-h-0 overflow-hidden bg-zinc-950">
       {/* Step navigator strip */}
@@ -446,7 +686,7 @@ function PreviewPhase({ demo }: { demo: Demo }) {
         {demo.steps.map((s, i) => (
           <button
             key={s.id}
-            onClick={() => setCurrentStepIdx(i)}
+            onClick={() => navigateTo(i)}
             className={cn(
               "flex items-center gap-2 p-2 rounded-lg text-left transition-colors",
               i === currentStepIdx
@@ -464,101 +704,142 @@ function PreviewPhase({ demo }: { demo: Demo }) {
 
       {/* Preview canvas */}
       <div className="flex-1 flex flex-col items-center justify-center p-8 gap-6">
-        {/* Step card */}
+        {/* Step card container */}
         <div
           className="relative w-full max-w-3xl rounded-xl overflow-hidden border border-zinc-800 shadow-[0_8px_40px_rgba(0,0,0,0.5)]"
           style={{
             aspectRatio: `${demo.settings.width}/${demo.settings.height}`,
           }}
         >
-          {step.screenshotDataUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={step.screenshotDataUrl}
-              alt={step.title ?? `Step ${currentStepIdx + 1}`}
-              className="w-full h-full object-cover"
-              draggable={false}
-            />
-          ) : (
-            <div className="w-full h-full flex items-center justify-center bg-zinc-900">
-              <p className="text-sm text-zinc-600">No screenshot</p>
+          {/* Outgoing step (previous) — only visible during transition */}
+          {isTransitioning && prevStep && (
+            <div className={cn("absolute inset-0 z-10", getOutgoingClass())}>
+              {prevStep.screenshotDataUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={prevStep.screenshotDataUrl}
+                  alt="Previous step"
+                  className={cn(
+                    "w-full h-full",
+                    (prevStep.imageFit ?? "cover") === "cover" && "object-cover",
+                    prevStep.imageFit === "contain" && "object-contain",
+                    prevStep.imageFit === "fill" && "object-fill",
+                    prevStep.imageFit === "none" && "object-none"
+                  )}
+                  draggable={false}
+                />
+              ) : (
+                <div className="w-full h-full bg-zinc-900" />
+              )}
             </div>
           )}
 
-          {/* Render hotspots in preview */}
-          {step.hotspots.map((h) => (
-            <div
-              key={h.id}
-              className={cn(
-                "absolute rounded-full border-2 cursor-pointer",
-                h.style === "pulse" && "border-violet-400 bg-violet-500/20 animate-pulse",
-                h.style === "highlight" && "border-yellow-400 bg-yellow-400/20",
-                h.style === "outline" && "border-zinc-300 bg-transparent",
-                h.style === "arrow" && "border-violet-500 bg-violet-500/15"
-              )}
-              style={{
-                left: `${h.bounds.x * 100}%`,
-                top: `${h.bounds.y * 100}%`,
-                width: `${h.bounds.width * 100}%`,
-                height: `${h.bounds.height * 100}%`,
-              }}
-              title={h.tooltip}
-              onClick={() => {
-                if (h.branchTo) {
-                  const idx = demo.steps.findIndex((s) => s.id === h.branchTo);
-                  if (idx >= 0) setCurrentStepIdx(idx);
-                } else {
-                  setCurrentStepIdx((i) => Math.min(i + 1, demo.steps.length - 1));
-                }
-              }}
-            />
-          ))}
+          {/* Incoming step (current) */}
+          <div className={cn("absolute inset-0 z-20", getIncomingClass())}>
+            {step.screenshotDataUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={step.screenshotDataUrl}
+                alt={step.title ?? `Step ${currentStepIdx + 1}`}
+                className={cn(
+                  "w-full h-full",
+                  (step.imageFit ?? "cover") === "cover" && "object-cover",
+                  step.imageFit === "contain" && "object-contain",
+                  step.imageFit === "fill" && "object-fill",
+                  step.imageFit === "none" && "object-none"
+                )}
+                draggable={false}
+              />
+            ) : (
+              <div className="w-full h-full flex items-center justify-center bg-zinc-900">
+                <p className="text-sm text-zinc-600">No screenshot</p>
+              </div>
+            )}
 
-          {/* Render callouts in preview */}
-          {step.callouts.map((c) => (
-            <div
-              key={c.id}
-              className={cn(
-                "absolute rounded-lg px-2 py-1.5 text-xs pointer-events-none",
-                "bg-zinc-900/90 border backdrop-blur-sm",
-                c.style === "tooltip" && "border-zinc-600 text-zinc-200",
-                c.style === "badge" && "border-violet-500/60 bg-violet-900/70 text-violet-100",
-                c.style === "arrow" && "border-yellow-500/60 bg-yellow-900/60 text-yellow-100"
-              )}
-              style={{
-                left: `${c.position.x * 100}%`,
-                top: `${c.position.y * 100}%`,
-              }}
-            >
-              {c.number !== undefined && (
-                <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-violet-600 text-[9px] font-bold text-white mr-1">
-                  {c.number}
-                </span>
-              )}
-              {c.text}
-            </div>
-          ))}
+            {/* Render hotspots in preview */}
+            {step.hotspots.map((h) => (
+              <div
+                key={h.id}
+                className={cn(
+                  "absolute rounded-lg border-2 cursor-pointer",
+                  h.style === "pulse" && "border-violet-400 bg-violet-500/20 animate-pulse",
+                  h.style === "highlight" && "border-yellow-400 bg-yellow-400/20",
+                  h.style === "outline" && "border-zinc-300 bg-transparent",
+                  h.style === "arrow" && "border-violet-500 bg-violet-500/15"
+                )}
+                style={{
+                  left: `${h.bounds.x * 100}%`,
+                  top: `${h.bounds.y * 100}%`,
+                  width: `${h.bounds.width * 100}%`,
+                  height: `${h.bounds.height * 100}%`,
+                }}
+                title={h.tooltip}
+                onClick={() => {
+                  if (h.branchTo) {
+                    const idx = demo.steps.findIndex((s) => s.id === h.branchTo);
+                    if (idx >= 0) navigateTo(idx);
+                  } else {
+                    navigateTo(Math.min(currentStepIdx + 1, demo.steps.length - 1));
+                  }
+                }}
+              />
+            ))}
 
-          {/* Render blur regions in preview */}
-          {step.blurRegions.map((b) => (
-            <div
-              key={b.id}
-              className="absolute pointer-events-none"
-              style={{
-                left: `${b.bounds.x * 100}%`,
-                top: `${b.bounds.y * 100}%`,
-                width: `${b.bounds.width * 100}%`,
-                height: `${b.bounds.height * 100}%`,
-                backdropFilter:
-                  b.mode === "blur"
-                    ? `blur(${Math.round(b.intensity * 20)}px)`
-                    : b.mode === "pixelate"
-                    ? `blur(${Math.round(b.intensity * 6)}px)`
-                    : "none",
-                background: b.mode === "mask" ? "rgba(9,9,11,0.85)" : undefined,
-              }}
-            />
-          ))}
+            {/* Render callouts in preview */}
+            {step.callouts.map((c) => (
+              <div
+                key={c.id}
+                className={cn(
+                  "absolute rounded-lg px-2 py-1.5 pointer-events-none flex flex-col",
+                  "bg-zinc-900/90 border backdrop-blur-sm",
+                  c.style === "tooltip" && "border-zinc-600 text-zinc-200",
+                  c.style === "badge" && "border-violet-500/60 bg-violet-900/70 text-violet-100",
+                  c.style === "arrow" && "border-yellow-500/60 bg-yellow-900/60 text-yellow-100",
+                  (c.textAlign ?? "left") === "left" && "text-left",
+                  c.textAlign === "center" && "text-center",
+                  c.textAlign === "right" && "text-right",
+                  (c.verticalAlign ?? "top") === "top" && "justify-start",
+                  c.verticalAlign === "middle" && "justify-center",
+                  c.verticalAlign === "bottom" && "justify-end"
+                )}
+                style={{
+                  left: `${c.position.x * 100}%`,
+                  top: `${c.position.y * 100}%`,
+                  width: `${(c.width ?? 0.15) * 100}%`,
+                  height: `${(c.height ?? 0.06) * 100}%`,
+                  fontSize: `${c.fontSize ?? 12}px`,
+                }}
+              >
+                {c.number !== undefined && (
+                  <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-violet-600 text-[9px] font-bold text-white mr-1">
+                    {c.number}
+                  </span>
+                )}
+                {c.text}
+              </div>
+            ))}
+
+            {/* Render blur regions in preview */}
+            {step.blurRegions.map((b) => (
+              <div
+                key={b.id}
+                className="absolute pointer-events-none"
+                style={{
+                  left: `${b.bounds.x * 100}%`,
+                  top: `${b.bounds.y * 100}%`,
+                  width: `${b.bounds.width * 100}%`,
+                  height: `${b.bounds.height * 100}%`,
+                  backdropFilter:
+                    b.mode === "blur"
+                      ? `blur(${Math.round(b.intensity * 20)}px)`
+                      : b.mode === "pixelate"
+                      ? `blur(${Math.round(b.intensity * 6)}px)`
+                      : "none",
+                  background: b.mode === "mask" ? "rgba(9,9,11,0.85)" : undefined,
+                }}
+              />
+            ))}
+          </div>
         </div>
 
         {/* Navigation controls */}
@@ -567,7 +848,7 @@ function PreviewPhase({ demo }: { demo: Demo }) {
             variant="outline"
             size="sm"
             disabled={currentStepIdx === 0}
-            onClick={() => setCurrentStepIdx((i) => i - 1)}
+            onClick={() => navigateTo(currentStepIdx - 1)}
             className="border-zinc-700 text-zinc-400 hover:text-zinc-200 disabled:opacity-30"
           >
             <svg className="w-3.5 h-3.5 mr-1.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
@@ -584,7 +865,7 @@ function PreviewPhase({ demo }: { demo: Demo }) {
             variant="outline"
             size="sm"
             disabled={currentStepIdx === demo.steps.length - 1}
-            onClick={() => setCurrentStepIdx((i) => i + 1)}
+            onClick={() => navigateTo(currentStepIdx + 1)}
             className="border-zinc-700 text-zinc-400 hover:text-zinc-200 disabled:opacity-30"
           >
             Next
@@ -593,6 +874,11 @@ function PreviewPhase({ demo }: { demo: Demo }) {
             </svg>
           </Button>
         </div>
+
+        {/* Transition type indicator */}
+        <span className="text-[10px] text-zinc-600">
+          Transition: {step.transition ?? "fade"}
+        </span>
       </div>
     </div>
   );
@@ -785,6 +1071,7 @@ export default function DemoPage() {
   const [demo, setDemo] = useState<Demo>(createDefaultDemo);
   const [analyzeProgress, setAnalyzeProgress] = useState(0);
   const [analyzeStep, setAnalyzeStep] = useState<string>(ANALYZE_STEPS[0]);
+  const [sensitivity, setSensitivity] = useState<Sensitivity>("medium");
 
   const phaseIndex = PHASES.indexOf(phase);
 
@@ -801,48 +1088,59 @@ export default function DemoPage() {
       setAnalyzeProgress(0);
 
       try {
-        // Simulate multi-step analysis with actual frame extraction
-        const steps = ANALYZE_STEPS.length;
-        for (let i = 0; i < steps; i++) {
-          setAnalyzeStep(ANALYZE_STEPS[i]);
-          // Advance progress through the step range
-          for (let p = 0; p <= 10; p++) {
-            await new Promise((r) => setTimeout(r, 60));
-            setAnalyzeProgress((i + p / 10) / steps);
-          }
-        }
-        setAnalyzeProgress(1);
-
-        // Build a single-step demo from the uploaded video file
+        // Create a video element for analysis
         const objectUrl = URL.createObjectURL(file);
         const vid = document.createElement("video");
         vid.src = objectUrl;
         vid.muted = true;
-        await new Promise<void>((res) => { vid.onloadedmetadata = () => res(); });
+        vid.playsInline = true;
+        vid.preload = "auto";
+        await new Promise<void>((res, rej) => {
+          vid.onloadedmetadata = () => res();
+          vid.onerror = () => rej(new Error("Failed to load video"));
+        });
 
-        // Extract a screenshot from the first frame
-        const canvas = document.createElement("canvas");
-        canvas.width = vid.videoWidth || 1280;
-        canvas.height = vid.videoHeight || 720;
-        vid.currentTime = 0;
-        await new Promise<void>((res) => { vid.onseeked = () => res(); });
-        const ctx = canvas.getContext("2d");
-        ctx?.drawImage(vid, 0, 0);
-        const screenshotDataUrl = canvas.toDataURL("image/jpeg", 0.85);
-        URL.revokeObjectURL(objectUrl);
+        // Run actual video analysis with progress reporting
+        const preset = SENSITIVITY_PRESETS[sensitivity];
+        const analyzer = new VideoAnalyzer({
+          analysisFPS: preset.analysisFPS,
+          sceneCutThreshold: preset.sceneCutThreshold,
+          thumbnailScale: preset.thumbnailScale,
+          minSceneDuration: preset.minSceneDuration,
+        });
 
-        const firstStep = createDefaultStep();
-        firstStep.screenshotDataUrl = screenshotDataUrl;
-        firstStep.title = "Step 1";
-
-        const newDemo = createDefaultDemo();
-        newDemo.title = file.name.replace(/\.[^.]+$/, "");
-        newDemo.steps = [firstStep];
-        newDemo.settings = {
-          ...newDemo.settings,
-          width: canvas.width,
-          height: canvas.height,
+        const phaseMap: Record<string, string> = {
+          "extracting": ANALYZE_STEPS[0],
+          "analyzing-scenes": ANALYZE_STEPS[1],
+          "detecting-cursor": ANALYZE_STEPS[2],
+          "detecting-clicks": ANALYZE_STEPS[2],
+          "finalizing": ANALYZE_STEPS[3],
         };
+
+        const analysis = await analyzer.analyze(vid, (progressInfo) => {
+          const label = phaseMap[progressInfo.phase] ?? progressInfo.message;
+          setAnalyzeStep(label);
+
+          // Map per-phase progress to overall progress
+          const phaseWeights: Record<string, [number, number]> = {
+            "extracting": [0, 0.5],
+            "analyzing-scenes": [0.5, 0.65],
+            "detecting-cursor": [0.65, 0.8],
+            "detecting-clicks": [0.8, 0.9],
+            "finalizing": [0.9, 1.0],
+          };
+          const [start, end] = phaseWeights[progressInfo.phase] ?? [0.9, 1.0];
+          setAnalyzeProgress(start + (end - start) * progressInfo.progress);
+        });
+
+        setAnalyzeProgress(1);
+        setAnalyzeStep(ANALYZE_STEPS[ANALYZE_STEPS.length - 1]);
+
+        // Build multi-step demo from analysis results
+        const newDemo = await DemoEngine.fromAnalysis(analysis, vid);
+        newDemo.title = file.name.replace(/\.[^.]+$/, "");
+
+        URL.revokeObjectURL(objectUrl);
 
         setDemo(newDemo);
         setPhase("edit-steps");
@@ -851,7 +1149,7 @@ export default function DemoPage() {
         setPhase("upload");
       }
     },
-    []
+    [sensitivity]
   );
 
   // ── Render ──────────────────────────────────────────────────────────────────
@@ -972,6 +1270,8 @@ export default function DemoPage() {
             <UploadPhase
               onUploadVideo={handleUploadVideo}
               onStartBlank={handleStartBlank}
+              sensitivity={sensitivity}
+              onSensitivityChange={setSensitivity}
             />
           </div>
         )}

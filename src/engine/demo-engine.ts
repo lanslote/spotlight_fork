@@ -80,6 +80,16 @@ export interface Callout {
   style: "tooltip" | "badge" | "numbered" | "arrow";
   /** Step number badge value, used when `style` is `'numbered'`. */
   number?: number;
+  /** Width as a fraction of the canvas (0–1). Default ~0.15. */
+  width?: number;
+  /** Height as a fraction of the canvas (0–1). Default ~0.06. */
+  height?: number;
+  /** Font size in pixels. Default 12. */
+  fontSize?: number;
+  /** Text alignment. Default "left". */
+  textAlign?: "left" | "center" | "right";
+  /** Vertical alignment. Default "top". */
+  verticalAlign?: "top" | "middle" | "bottom";
 }
 
 /** A rectangular region of the screenshot that is blurred, masked, or pixelated. */
@@ -148,6 +158,8 @@ export interface DemoStep {
   chapter?: string;
   /** Short display title shown in chapter nav and progress tooltips. */
   title?: string;
+  /** How the screenshot fits within the canvas. Default "cover". */
+  imageFit?: "cover" | "contain" | "fill" | "none";
 }
 
 // ─── Chapter ──────────────────────────────────────────────────────────────────
